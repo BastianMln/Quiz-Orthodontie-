@@ -9,7 +9,7 @@
    vault/img/<id>.enc   photos (chiffré K ou clé publique)
    vault/inbox/*.enc    contenus déposés (clé publique), fusionnés puis effacés
    ============================================================ */
-const APP_VERSION = "2026.09.28-1";
+const APP_VERSION = "2026.09.28-2";
 const GH = { owner: "BastianMln", repo: "Quiz-Orthodontie-", branch: "data" };
 const COLS = ["library", "questions", "series", "dossiers", "themes"];
 const COL2KEY = { library: "lib", questions: "qs", series: "series", dossiers: "dossiers", themes: "themes" };
@@ -122,7 +122,7 @@ async function gh(path, opt) {
       body: opt.body ? JSON.stringify(opt.body) : undefined,
     });
   } catch (e) { throw ghErr("offline"); }
-  if (r.status === 401) throw ghErr("token", 401);
+  if (r.status === 401) { let m = ""; try { m = (await r.json()).message || ""; } catch (e) {} const er = ghErr("token", 401); er.detail = m; throw er; }
   if (r.status === 403 && r.headers.get("x-ratelimit-remaining") === "0") throw ghErr("ratelimit", 403);
   return r;
 }

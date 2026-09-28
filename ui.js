@@ -130,7 +130,8 @@ function setupToken(err) {
     <p class="muted">Sur iPhone et Mac, le même jeton se colle d'un appareil à l'autre grâce au presse-papiers partagé. Il reste sur l'appareil et n'est envoyé qu'à GitHub.</p>
   </div>`);
   const go = async () => {
-    const v = $("#tok").value.trim(); if (!v) return;
+    const v = $("#tok").value.replace(/[\s\u200B-\u200D\uFEFF]/g, ""); if (!v) return;
+    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]+$/.test(v)) return setupToken("Ce texte ne ressemble pas à un jeton GitHub : il doit commencer par « github_pat_ » (ou « ghp_ ») et ne contenir que des lettres, chiffres et « _ ». Recopie-le en entier depuis GitHub (bouton de copie à droite du jeton).");
     const b = $("#tokgo"); b.disabled = true; b.textContent = "Vérification…";
     TOKEN = v;
     try {
@@ -139,7 +140,7 @@ function setupToken(err) {
       await afterToken();
     } catch (e) {
       TOKEN = "";
-      const m = { token: "Jeton refusé par GitHub. Vérifie qu'il est copié en entier.", norepo: `Dépôt ${GH.owner}/${GH.repo} introuvable avec ce jeton : vérifie qu'il donne accès à ${GH.repo}.`, readonly: "Ce jeton ne peut que lire. Donne-lui « Contents : Read and write ».", offline: "Pas de connexion : la première mise en place demande internet.", nobranch: "Impossible de préparer le dépôt (il est peut-être vide)." }[e.code] || "Échec de la vérification (" + (e.code || e.message) + ").";
+      const m = { token: "GitHub refuse ce jeton" + (e.detail ? " (« " + e.detail + " »)" : "") + ". Longueur collée : " + v.length + " caractères (un jeton récent en fait 93). S'il est plus court, il a été coupé : recopie-le avec le bouton de copie. Sinon, crée-en un nouveau : un jeton n'est affiché qu'une fois.", norepo: `Dépôt ${GH.owner}/${GH.repo} introuvable avec ce jeton : vérifie qu'il donne accès à ${GH.repo}.`, readonly: "Ce jeton ne peut que lire. Donne-lui « Contents : Read and write ».", offline: "Pas de connexion : la première mise en place demande internet.", nobranch: "Impossible de préparer le dépôt (il est peut-être vide)." }[e.code] || "Échec de la vérification (" + (e.code || e.message) + ").";
       setupToken(m);
     }
   };
@@ -784,7 +785,7 @@ function renderSettings(err) {
     } catch (e) { renderSettings(e.code === "offline" ? "Il faut être en ligne pour changer le mot de passe." : "Échec (" + (e.code || e.message) + ")."); }
   };
   $("#settok").onclick = async () => {
-    const v = $("#ntok").value.trim(); if (!v) return; const old = TOKEN; TOKEN = v;
+    const v = $("#ntok").value.replace(/[\s\u200B-\u200D\uFEFF]/g, ""); if (!v) return; const old = TOKEN; TOKEN = v;
     try { await ghCheckAccess(); await idb.set("kv", "token", TOKEN); SYNC.error = ""; toast("Jeton remplacé"); sync(); renderSettings(); }
     catch (e) { TOKEN = old; toast(e.code === "token" ? "Jeton refusé." : e.code === "readonly" ? "Ce jeton ne peut que lire." : "Vérification impossible (" + e.code + ")."); }
   };

@@ -1,6 +1,6 @@
 /* Service worker : l'app s'ouvre même sans réseau.
    VERSION change à chaque mise à jour de l'app (pas du contenu, qui passe par GitHub). */
-const VERSION = "quiz-odf-2026.09.28-1";
+const VERSION = "quiz-odf-2026.09.28-2";
 const CORE = ["./", "./index.html", "./style.css", "./schemas.js", "./core.js", "./ui.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE.map(u => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
