@@ -261,3 +261,6 @@ button.chip{cursor:pointer}
 .docnote{border-top:1px solid var(--line);margin-top:12px;padding-top:12px;font-family:var(--f-read)}
 @media (max-width:560px){ .item{grid-template-columns:1fr} .item .acts{justify-content:flex-start} .panel{padding:16px} }
 .toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+.askpanel{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+a.btn{text-decoration:none;display:inline-block}
+.prompt{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;margin:0;max-height:320px;overflow:auto}

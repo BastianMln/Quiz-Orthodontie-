@@ -27,7 +27,7 @@ const SCHEMA_LABELS = { facemask: "Masque facial", wires: "Courbes charge-flexio
 
 let STAGE = "loading"; /* loading | token | create | unlock | ready */
 let VIEW = { tab: "rev", mode: "home", sub: "docs", edit: null, confirm: null, doc: null, theme: null, manage: false, renaming: null,
-  filter: { kind: "", q: "", serie: "", theme: "" }, compose: { sel: [], filter: "all", count: "20" } };
+  filter: { kind: "", q: "", serie: "", theme: "" }, compose: { sel: [], filter: "all", count: "20" }, request: null };
 let S = { list: [], i: 0, sel: [], done: false, results: {}, name: "" };
 
 /* ---------- données dérivées ---------- */
@@ -227,7 +227,7 @@ function home() {
     return `<div class="serie"><div><span class="eyebrow">${k === 0 ? "La plus récente" : "Série"}</span><h2>${esc(sr.name)}</h2><p>${esc(sr.sub || "")}</p><div class="meta">${plural(ids.length, "question")} · ${d} déjà faite${d > 1 ? "s" : ""}${sr.note ? " · " + esc(sr.note) : ""}</div></div>
     <div class="btns">${ids.length ? `<button class="btn" data-s="${sid}">Commencer</button>` : ""}${w ? `<button class="btn ghost" data-w="${sid}">Revoir ${plural(w, "erreur")}</button>` : ""}</div></div>`;
   }).join("")}</div>` : ""}
-  ${allIds.length ? `<div class="actions" style="margin:0 0 14px"><button class="btn ghost" id="bytheme">Réviser par thème</button>${wAll ? `<button class="btn ghost" id="allw">Revoir toutes mes erreurs (${wAll})</button>` : ""}</div>` : ""}
+  ${allIds.length ? `<div class="actions" style="margin:0 0 14px"><button class="btn ghost" id="bytheme">Réviser par thème</button><button class="btn ghost" id="askhome">Demander une nouvelle série</button>${wAll ? `<button class="btn ghost" id="allw">Revoir toutes mes erreurs (${wAll})</button>` : ""}</div>` : ""}
   <div class="panel">
     <div class="rules">
       <div class="rule"><b>Notation tout ou rien</b>La question compte seulement si toutes les propositions sont bien traitées, comme à l'examen.</div>
@@ -240,6 +240,7 @@ function home() {
   $$("[data-w]").forEach(b => b.onclick = () => startRun(lastWrongIds(qidsOf(b.dataset.w)), DATA.series[b.dataset.w].name + " · erreurs"));
   const aw = $("#allw"); if (aw) aw.onclick = () => startRun(lastWrongIds(seriesSorted().flatMap(([sid]) => qidsOf(sid))), "Mes erreurs");
   const bt = $("#bytheme"); if (bt) bt.onclick = () => go("themes");
+  const ah = $("#askhome"); if (ah) ah.onclick = () => { go("themes"); openRequest([]); };
   const ck = $("#chk"); if (ck) ck.onclick = () => { toast("Vérification…"); sync(); };
 }
 function startRun(list, name) { if (!list.length) { toast("Aucune question ne correspond."); return; } VIEW.tab = "rev"; setNav(); S = { list: list.slice(), i: 0, sel: [], done: false, results: {}, name }; question(); }
@@ -372,6 +373,7 @@ function composePool() {
 }
 function renderThemes() {
   renderTrack(); $("#qset").textContent = "Thématiques";
+  if (VIEW.request) return requestForm();
   if (VIEW.manage) return manageThemes();
   if (VIEW.theme && DATA.themes[VIEW.theme]) return themeDetail(VIEW.theme);
   const ts = themesSorted(); const c = VIEW.compose;
@@ -388,6 +390,7 @@ function renderThemes() {
     </div>
     <div class="actions"><button class="btn" id="cgo" ${count ? "" : "disabled"}>${c.sel.length ? (count ? `Lancer ${plural(count, "question")}` : "Aucune question") : "Choisis au moins un thème"}</button>${c.sel.length ? `<button class="btn ghost" id="cclear">Tout décocher</button>` : ""}</div>
   </section>
+  <section class="panel askpanel" style="margin-bottom:14px"><div><h2 style="font-size:17px">Envie d'une nouvelle série ?</h2><p class="muted" style="margin:4px 0 0">Choisis les thèmes et le format : la demande s'ouvre dans Claude, déjà rédigée.</p></div><button class="btn" id="askserie">Demander une série</button></section>
   <div class="tools"><h2 style="font-size:17px;flex:1">Tous les thèmes</h2><button class="btn ghost" id="tmanage">Ajouter ou supprimer des thèmes</button></div>
   <div class="tgrid">${ts.map(([tid, t]) => { const st = themeStats(tid);
     return `<button class="tcard" data-open="${tid}"><span class="ti">${esc(t.name)}</span><span class="su">${plural(st.n, "question")} · ${plural(st.docs, "document")}</span>${bar(st)}<span class="su">${st.n ? `${st.ok} réussie${st.ok > 1 ? "s" : ""} · ${st.wrong} à revoir · ${st.never} jamais faite${st.never > 1 ? "s" : ""}` : "Pas encore de question"}</span></button>`; }).join("") || `<div class="empty">Aucun thème. Ajoute-en avec le bouton ci-dessus.</div>`}</div>`);
@@ -397,6 +400,7 @@ function renderThemes() {
   const cg = $("#cgo"); if (cg) cg.onclick = () => { const l = mixKeepDossiers(composePool()).slice(0, c.count === "all" ? undefined : +c.count); startRun(l, c.sel.map(themeName).join(" + ")); };
   const cc = $("#cclear"); if (cc) cc.onclick = () => { c.sel = []; renderThemes(); };
   $("#tmanage").onclick = () => { VIEW.manage = true; renderThemes(); };
+  $("#askserie").onclick = () => openRequest(c.sel);
   $$("[data-open]").forEach(b => b.onclick = () => { VIEW.theme = b.dataset.open; renderThemes(); window.scrollTo({ top: 0 }); });
 }
 function themeDetail(tid) {
@@ -439,6 +443,87 @@ function manageThemes() {
     for (const [id, d] of Object.entries(DATA.lib)) if ((d.themes || []).includes(tid)) putDoc("library", id, Object.assign({}, d, { themes: d.themes.filter(x => x !== tid) }));
     delDoc("themes", tid); VIEW.confirm = null; VIEW.compose.sel = VIEW.compose.sel.filter(x => x !== tid); toast("Thème supprimé"); manageThemes();
   });
+}
+
+/* ============================================================
+   DEMANDER UNE SÉRIE À CLAUDE
+   ============================================================ */
+function openRequest(sel) {
+  VIEW.request = { themes: (sel || []).slice(), count: "15", format: "mix", focus: "equilibre", docs: [], notes: "" };
+  VIEW.tab = "themes"; setNav(); renderThemes(); window.scrollTo({ top: 0 });
+}
+function nextSerie() {
+  const maxo = Math.max(0, ...Object.values(DATA.series).map(s => s.order || 0));
+  const n = maxo + 1; return { n, id: "s" + String(n).padStart(2, "0"), name: "Série " + String(n).padStart(2, "0") };
+}
+const REQ_FORMATS = { mix: "Mélange : questions isolées + 1 ou 2 dossiers progressifs", isolees: "Questions isolées uniquement", dossiers: "Dossiers progressifs uniquement (cas cliniques en étapes)" };
+const REQ_FOCUS = { equilibre: "Équilibré : moitié raisonnement clinique et biomécanique, moitié connaissances", clinique: "Surtout raisonnement clinique et biomécanique", connaissances: "Surtout connaissances (cours et synthèses)" };
+function buildPrompt(r) {
+  const ns = nextSerie();
+  const th = r.themes.map(t => `${themeName(t)} [${t}]`);
+  const covered = Object.entries(DATA.qs).filter(([id, q]) => !r.themes.length || (q.themes || []).some(t => r.themes.includes(t)))
+    .map(([id, q]) => `${id} (${q.theme || ""})`).slice(0, 80);
+  const docIds = r.docs.length ? r.docs : Object.entries(DATA.lib).filter(([id, d]) => !r.themes.length || (d.themes || []).some(t => r.themes.includes(t))).map(([id]) => id);
+  const docs = docIds.filter(id => DATA.lib[id]).slice(0, 60).map(id => `${id} : ${DATA.lib[id].title}${DATA.lib[id].location ? " (" + DATA.lib[id].location + ")" : ""}`);
+  const allThemes = themesSorted().map(([tid, t]) => `${tid} = ${t.name}`);
+  return [
+    "/quiz-odf-serie",
+    "",
+    "Crée une nouvelle série pour mon app Quiz ODF (utilise la compétence quiz-odf-serie) et dépose-la dans mon coffre.",
+    "",
+    `- Série : ${ns.name} (id ${ns.id}, order ${ns.n})`,
+    `- Thèmes : ${th.length ? th.join(", ") : "au choix, en mélangeant plusieurs thèmes"}`,
+    `- Nombre de questions : ${r.count}`,
+    `- Format : ${REQ_FORMATS[r.format]}`,
+    `- Accent : ${REQ_FOCUS[r.focus]}`,
+    r.notes ? `- Précisions : ${r.notes}` : "",
+    "",
+    r.docs.length ? "Documents à exploiter en priorité (id : titre) :" : "Documents de ma bibliothèque sur ces thèmes (id : titre), à citer par leur id s'ils servent de source :",
+    ...docs.map(x => "  " + x),
+    "",
+    "Questions déjà présentes sur ces thèmes (ne pas les refaire) :",
+    "  " + (covered.join(" ; ") || "aucune"),
+    "",
+    "Identifiants des thèmes de l'app :",
+    "  " + allThemes.join(" ; "),
+  ].filter(x => x !== null).join("\n").replace(/\n{3,}/g, "\n\n");
+}
+function requestForm() {
+  const r = VIEW.request; const ns = nextSerie();
+  const lib = Object.entries(DATA.lib).filter(([id, d]) => !r.themes.length || (d.themes || []).some(t => r.themes.includes(t)))
+    .sort((a, b) => KINDS.indexOf(a[1].kind) - KINDS.indexOf(b[1].kind) || a[1].title.localeCompare(b[1].title, "fr"));
+  const prompt = buildPrompt(r);
+  page(`<div class="panel">
+    <div class="tools"><button class="sbtn" id="back">← Thèmes</button><h2 style="font-size:18px;flex:1">Demander la ${esc(ns.name)}</h2></div>
+    <div class="form">
+      <div class="f" style="display:grid;gap:6px"><span style="font-size:13px;font-weight:600;color:var(--ink-2)">Thèmes <small style="font-weight:400;color:var(--ink-3)">aucun coché = mélange libre</small></span>
+        <div class="tchips">${themesSorted().map(([tid, t]) => `<button class="tchip" aria-pressed="${r.themes.includes(tid)}" data-rt="${tid}">${esc(t.name)}</button>`).join("")}</div></div>
+      <div class="grid2">
+        <label class="f">Nombre de questions<select id="r_count">${["10", "15", "20", "30"].map(v => `<option ${r.count === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        <label class="f">Format<select id="r_format">${Object.entries(REQ_FORMATS).map(([k, v]) => `<option value="${k}" ${r.format === k ? "selected" : ""}>${esc(v.split(" :")[0].split(" (")[0])}</option>`).join("")}</select></label>
+        <label class="f">Accent<select id="r_focus">${Object.entries(REQ_FOCUS).map(([k, v]) => `<option value="${k}" ${r.focus === k ? "selected" : ""}>${esc(v.split(" :")[0])}</option>`).join("")}</select></label>
+      </div>
+      <div class="f" style="display:grid;gap:6px"><span style="font-size:13px;font-weight:600;color:var(--ink-2)">Documents à exploiter en priorité <small style="font-weight:400;color:var(--ink-3)">facultatif</small></span>
+        <div class="checks">${lib.map(([id, d]) => `<label><input type="checkbox" class="rdoc" value="${id}" ${r.docs.includes(id) ? "checked" : ""}><span>${esc(d.title)} <span class="k">${esc(d.kind)}</span></span></label>`).join("") || `<span class="muted">Aucun document sur ces thèmes.</span>`}</div></div>
+      <label class="f">Précisions <small>ex. « sur mon cours de disjonction », « niveau examen », « plus de photos cliniques »</small><textarea id="r_notes">${esc(r.notes)}</textarea></label>
+      <details class="more"><summary>Voir la demande qui sera envoyée</summary><div class="inner"><pre class="prompt">${esc(prompt)}</pre></div></details>
+    </div>
+    <div class="actions">
+      <a class="btn" id="r_app" href="claude://claude.ai/new?q=${encodeURIComponent(prompt)}">Ouvrir dans l'app Claude</a>
+      <a class="btn ghost" id="r_web" href="https://claude.ai/new?q=${encodeURIComponent(prompt)}" target="_blank" rel="noopener">Ouvrir sur claude.ai</a>
+      <button class="btn ghost" id="r_copy">Copier la demande</button>
+    </div>
+    <p class="muted">La demande ne contient que des titres et des identifiants, pas le contenu de tes questions. Une fois la série déposée, elle apparaît ici toute seule (ou avec « Synchroniser maintenant »).</p>
+  </div>`);
+  const keep = () => { r.count = val("r_count"); r.format = val("r_format"); r.focus = val("r_focus"); r.notes = $("#r_notes").value; r.docs = $$(".rdoc:checked").map(x => x.value); };
+  $("#back").onclick = () => { VIEW.request = null; renderThemes(); };
+  $$("[data-rt]").forEach(b => b.onclick = () => { keep(); const t = b.dataset.rt; r.themes = r.themes.includes(t) ? r.themes.filter(x => x !== t) : r.themes.concat(t); r.docs = r.docs.filter(id => { const d = DATA.lib[id]; return d && (!r.themes.length || (d.themes || []).some(x => r.themes.includes(x))); }); requestForm(); });
+  ["r_count", "r_format", "r_focus"].forEach(id => $("#" + id).onchange = () => { keep(); requestForm(); });
+  $$(".rdoc").forEach(x => x.onchange = () => { keep(); requestForm(); });
+  $("#r_notes").onchange = () => { keep(); requestForm(); };
+  const refresh = () => { keep(); const p = buildPrompt(r); $("#r_app").href = "claude://claude.ai/new?q=" + encodeURIComponent(p); $("#r_web").href = "https://claude.ai/new?q=" + encodeURIComponent(p); $(".prompt").textContent = p; };
+  $("#r_notes").oninput = refresh;
+  $("#r_copy").onclick = async () => { refresh(); try { await navigator.clipboard.writeText(buildPrompt(r)); toast("Demande copiée : colle-la dans une conversation Claude."); } catch (e) { toast("Copie impossible : ouvre « Voir la demande » et copie le texte."); } };
 }
 
 /* ============================================================
@@ -814,7 +899,7 @@ function renderSettings(err) {
    DÉMARRAGE
    ============================================================ */
 function go(tab) {
-  VIEW.tab = tab; VIEW.edit = null; VIEW.confirm = null; VIEW.doc = null; VIEW.theme = null; VIEW.manage = false; VIEW.renaming = null;
+  VIEW.tab = tab; VIEW.edit = null; VIEW.confirm = null; VIEW.doc = null; VIEW.theme = null; VIEW.manage = false; VIEW.renaming = null; VIEW.request = null;
   if (tab === "rev") VIEW.mode = "home";
   render(); window.scrollTo({ top: 0 });
 }

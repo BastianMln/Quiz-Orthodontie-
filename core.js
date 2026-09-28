@@ -9,7 +9,7 @@
    vault/img/<id>.enc   photos (chiffré K ou clé publique)
    vault/inbox/*.enc    contenus déposés (clé publique), fusionnés puis effacés
    ============================================================ */
-const APP_VERSION = "2026.09.28-2";
+const APP_VERSION = "2026.09.28-3";
 const GH = { owner: "BastianMln", repo: "Quiz-Orthodontie-", branch: "data" };
 const COLS = ["library", "questions", "series", "dossiers", "themes"];
 const COL2KEY = { library: "lib", questions: "qs", series: "series", dossiers: "dossiers", themes: "themes" };
