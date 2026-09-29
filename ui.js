@@ -136,7 +136,7 @@ function setupToken(err) {
     TOKEN = v;
     try {
       await ghCheckAccess();
-      await idb.set("kv", "token", TOKEN);
+      await saveToken(TOKEN);
       await afterToken();
     } catch (e) {
       TOKEN = "";
@@ -148,7 +148,7 @@ function setupToken(err) {
 }
 async function afterToken() {
   const k = await ghGet("vault/keys.json");
-  if (k) { KEYS_FILE = JSON.parse(k.text); await idb.set("kv", "keysFile", KEYS_FILE); STAGE = "unlock"; }
+  if (k) { KEYS_FILE = JSON.parse(k.text); await saveKeysFile(KEYS_FILE); STAGE = "unlock"; }
   else STAGE = "create";
   render();
 }
@@ -170,11 +170,11 @@ function setupCreate(err) {
     const btn = $("#pwgo"); btn.disabled = true; btn.textContent = "Création…";
     try {
       const ex = await ghGet("vault/keys.json");
-      if (ex) { KEYS_FILE = JSON.parse(ex.text); await idb.set("kv", "keysFile", KEYS_FILE); STAGE = "unlock"; toast("Un coffre existe déjà : entre son mot de passe."); return render(); }
-      const { file, key } = await createKeys(a);
+      if (ex) { KEYS_FILE = JSON.parse(ex.text); await saveKeysFile(KEYS_FILE); STAGE = "unlock"; toast("Un coffre existe déjà : entre son mot de passe."); return render(); }
+      const { file, key, raw } = await createKeys(a);
       await ghPut("vault/keys.json", JSON.stringify(file, null, 1), null, "création du coffre");
       KEYS_FILE = file; KEY = key;
-      await idb.set("kv", "keysFile", file); await idb.set("kv", "key", key);
+      await saveKeysFile(file); await saveKey(key, raw);
       STAGE = "ready"; VIEW.tab = "rev"; VIEW.mode = "home"; render(); startLoops();
     } catch (e) { setupCreate("Échec (" + (e.code || e.message) + "). Réessaie."); }
   };
@@ -190,9 +190,10 @@ function setupUnlock(err) {
   </div>`);
   const go = async () => {
     const b = $("#ungo"); b.disabled = true; b.textContent = "Vérification…";
-    try { KEY = await unlockKeys(KEYS_FILE, $("#pw").value, false); }
+    let raw;
+    try { const k = await unlockKeys(KEYS_FILE, $("#pw").value, true); raw = b64(await crypto.subtle.exportKey("raw", k)); KEY = await importRawKey(raw); }
     catch (e) { return setupUnlock("Mot de passe incorrect."); }
-    await idb.set("kv", "key", KEY);
+    await saveKey(KEY, raw);
     STAGE = "ready"; VIEW.tab = "rev"; VIEW.mode = "home"; render(); startLoops();
   };
   $("#ungo").onclick = go; $("#pw").onkeydown = e => { if (e.key === "Enter") go(); };
@@ -866,12 +867,12 @@ function renderSettings(err) {
       const cur = await ghGet("vault/keys.json"); const file = cur ? JSON.parse(cur.text) : KEYS_FILE;
       let nf; try { nf = await rewrapKeys(file, o, n); } catch (e) { return renderSettings("Mot de passe actuel incorrect."); }
       await ghPut("vault/keys.json", JSON.stringify(nf, null, 1), cur && cur.sha, "changement du mot de passe");
-      KEYS_FILE = nf; await idb.set("kv", "keysFile", nf); toast("Mot de passe changé"); renderSettings();
+      KEYS_FILE = nf; await saveKeysFile(nf); toast("Mot de passe changé"); renderSettings();
     } catch (e) { renderSettings(e.code === "offline" ? "Il faut être en ligne pour changer le mot de passe." : "Échec (" + (e.code || e.message) + ")."); }
   };
   $("#settok").onclick = async () => {
     const v = $("#ntok").value.replace(/[\s\u200B-\u200D\uFEFF]/g, ""); if (!v) return; const old = TOKEN; TOKEN = v;
-    try { await ghCheckAccess(); await idb.set("kv", "token", TOKEN); SYNC.error = ""; toast("Jeton remplacé"); sync(); renderSettings(); }
+    try { await ghCheckAccess(); await saveToken(TOKEN); SYNC.error = ""; toast("Jeton remplacé"); sync(); renderSettings(); }
     catch (e) { TOKEN = old; toast(e.code === "token" ? "Jeton refusé." : e.code === "readonly" ? "Ce jeton ne peut que lire." : "Vérification impossible (" + e.code + ")."); }
   };
   $("#bk").onclick = () => {
@@ -891,7 +892,7 @@ function renderSettings(err) {
     fr.readAsText(f);
   };
   $("#forget").onclick = () => { VIEW.confirm = { id: "forget" }; renderSettings(); };
-  const fo = $("#forgetok"); if (fo) fo.onclick = async () => { await idb.clear("kv"); await idb.clear("img"); location.reload(); };
+  const fo = $("#forgetok"); if (fo) fo.onclick = async () => { LS.clear(); try { await idb.clear("kv"); await idb.clear("img"); } catch (e) {} location.reload(); };
   const fn = $("#forgetno"); if (fn) fn.onclick = () => { VIEW.confirm = null; renderSettings(); };
 }
 
@@ -915,14 +916,16 @@ async function boot() {
       reloaded = true; location.reload();
     });
   }
-  try {
-    TOKEN = (await idb.get("kv", "token")) || "";
-    KEY = (await idb.get("kv", "key")) || null;
-    KEYS_FILE = (await idb.get("kv", "keysFile")) || null;
-    CONTENT = (await idb.get("kv", "content")) || emptyContent();
-    PROG = (await idb.get("kv", "prog")) || {};
-    META = Object.assign(META, (await idb.get("kv", "meta")) || {});
-  } catch (e) { toast("Stockage de l'appareil indisponible (navigation privée ?)."); }
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  const get = async k => { try { return await idb.get("kv", k); } catch (e) { return undefined; } };
+  TOKEN = (await get("token")) || LS.get("token") || "";
+  KEYS_FILE = (await get("keysFile")) || LS.get("keysFile") || null;
+  KEY = await loadKey();
+  if (TOKEN && !LS.get("token")) LS.set("token", TOKEN);           /* anciens appareils : on complète le secours */
+  if (KEYS_FILE && !LS.get("keysFile")) LS.set("keysFile", KEYS_FILE);
+  CONTENT = (await get("content")) || LS.get("content") || emptyContent();
+  PROG = (await get("prog")) || LS.get("prog") || {};
+  META = Object.assign(META, (await get("meta")) || LS.get("meta") || {});
   rebuild();
   if (!TOKEN) { STAGE = "token"; return render(); }
   if (!KEY) {

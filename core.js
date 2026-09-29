@@ -9,7 +9,7 @@
    vault/img/<id>.enc   photos (chiffré K ou clé publique)
    vault/inbox/*.enc    contenus déposés (clé publique), fusionnés puis effacés
    ============================================================ */
-const APP_VERSION = "2026.09.28-3";
+const APP_VERSION = "2026.09.29-1";
 const GH = { owner: "BastianMln", repo: "Quiz-Orthodontie-", branch: "data" };
 const COLS = ["library", "questions", "series", "dossiers", "themes"];
 const COL2KEY = { library: "lib", questions: "qs", series: "series", dossiers: "dossiers", themes: "themes" };
@@ -71,7 +71,8 @@ async function createKeys(pw) {
   const priv = await aesEnc(k, new Uint8Array(pkcs8));
   const pub = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const file = { v: 1, iter: PBKDF2_ITER, salt: b64(salt), wrapIv: b64(wrapIv), wrapped: b64(wrapped), pub, priv, created: new Date().toISOString() };
-  return { file, key: await crypto.subtle.importKey("raw", await crypto.subtle.exportKey("raw", k), "AES-GCM", false, ["encrypt", "decrypt"]) };
+  const raw = b64(await crypto.subtle.exportKey("raw", k));
+  return { file, raw, key: await importRawKey(raw) };
 }
 async function unlockKeys(file, pw, extractable) {
   const wk = await pwKey(pw, unb64(file.salt), file.iter);
@@ -93,14 +94,18 @@ const idb = (() => {
     dbp = new Promise((res, rej) => {
       const r = indexedDB.open("quiz-odf", 1);
       r.onupgradeneeded = () => { const d = r.result; ["kv", "img"].forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); }); };
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      r.onsuccess = () => { const d = r.result; d.onclose = () => { dbp = null; }; d.onversionchange = () => { d.close(); dbp = null; }; res(d); };
+      r.onerror = () => { dbp = null; rej(r.error); };
+      r.onblocked = () => { dbp = null; rej(new Error("blocked")); };
     });
     return dbp;
   }
-  const tx = (store, mode, fn) => open().then(d => new Promise((res, rej) => {
+  const once = (store, mode, fn) => open().then(d => new Promise((res, rej) => {
     const t = d.transaction(store, mode); const s = t.objectStore(store); const out = fn(s);
     t.oncomplete = () => res(out && "result" in out ? out.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
   }));
+  /* iOS coupe parfois la connexion IndexedDB quand l'app passe en arrière-plan : on rouvre et on réessaie */
+  const tx = (store, mode, fn) => once(store, mode, fn).catch(e => { dbp = null; return new Promise(r => setTimeout(r, 150)).then(() => once(store, mode, fn)); });
   return {
     get: (s, k) => tx(s, "readonly", st => st.get(k)),
     set: (s, k, v) => tx(s, "readwrite", st => st.put(v, k)),
@@ -108,6 +113,23 @@ const idb = (() => {
     clear: s => tx(s, "readwrite", st => st.clear()),
   };
 })();
+/* Doublon de secours dans localStorage pour ce qui permet de se reconnecter (jeton, coffre, clé) */
+const LS = {
+  get(k) { try { const v = localStorage.getItem("odf." + k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem("odf." + k, JSON.stringify(v)); } catch (e) {} },
+  clear() { try { ["token", "keysFile", "k", "content", "prog", "meta"].forEach(k => localStorage.removeItem("odf." + k)); } catch (e) {} },
+};
+async function saveToken(t) { LS.set("token", t); try { await idb.set("kv", "token", t); } catch (e) {} }
+async function saveKeysFile(f) { LS.set("keysFile", f); try { await idb.set("kv", "keysFile", f); } catch (e) {} }
+/* raw : clé maître exportée (base64), gardée seulement sur cet appareil */
+async function saveKey(key, raw) { if (raw) LS.set("k", raw); try { await idb.set("kv", "key", key); } catch (e) {} }
+async function loadKey() {
+  let k = null; try { k = await idb.get("kv", "key"); } catch (e) {}
+  if (k) return k;
+  const raw = LS.get("k"); if (!raw) return null;
+  try { k = await crypto.subtle.importKey("raw", unb64(raw), "AES-GCM", false, ["encrypt", "decrypt"]); idb.set("kv", "key", k).catch(() => {}); return k; } catch (e) { return null; }
+}
+async function importRawKey(raw) { return crypto.subtle.importKey("raw", unb64(raw), "AES-GCM", false, ["encrypt", "decrypt"]); }
 
 /* ---------- GitHub ---------- */
 let TOKEN = "";
@@ -227,7 +249,7 @@ function rebuild() {
   DATA = d;
 }
 let saveT = null;
-function flushLocal() { clearTimeout(saveT); saveT = null; return Promise.all([idb.set("kv", "content", CONTENT), idb.set("kv", "prog", PROG), idb.set("kv", "meta", META)]).catch(() => {}); }
+function flushLocal() { clearTimeout(saveT); saveT = null; LS.set("content", CONTENT); LS.set("prog", PROG); LS.set("meta", META); return Promise.all([idb.set("kv", "content", CONTENT), idb.set("kv", "prog", PROG), idb.set("kv", "meta", META)]).catch(() => {}); }
 function persistLocal(now) {
   if (now) return flushLocal();
   clearTimeout(saveT); saveT = setTimeout(flushLocal, 120);
