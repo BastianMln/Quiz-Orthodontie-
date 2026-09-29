@@ -9,10 +9,10 @@
    vault/img/<id>.enc   photos (chiffré K ou clé publique)
    vault/inbox/*.enc    contenus déposés (clé publique), fusionnés puis effacés
    ============================================================ */
-const APP_VERSION = "2026.09.29-1";
+const APP_VERSION = "2026.09.29-2";
 const GH = { owner: "BastianMln", repo: "Quiz-Orthodontie-", branch: "data" };
 const COLS = ["library", "questions", "series", "dossiers", "themes"];
-const COL2KEY = { library: "lib", questions: "qs", series: "series", dossiers: "dossiers", themes: "themes" };
+const COL2KEY = { library: "lib", questions: "qs", series: "series", dossiers: "dossiers", themes: "themes", settings: "settings" };
 
 /* ---------- encodage ---------- */
 const TE = new TextEncoder(), TD = new TextDecoder();
@@ -234,13 +234,13 @@ function histSig(h) { return JSON.stringify(Object.keys(h).sort().map(k => [k, (
 
 /* ---------- état ---------- */
 let CONTENT = emptyContent();
-let DATA = { lib: {}, qs: {}, series: {}, dossiers: {}, themes: {} };
+let DATA = { lib: {}, qs: {}, series: {}, dossiers: {}, themes: {}, settings: {} };
 let PROG = {};
 let META = { contentDirty: false, progDirty: false, lastSync: 0, imgUp: [], imgDel: [] };
 let SYNC = { busy: false, again: false, error: "", timer: null };
 
 function rebuild() {
-  const d = { lib: {}, qs: {}, series: {}, dossiers: {}, themes: {} };
+  const d = { lib: {}, qs: {}, series: {}, dossiers: {}, themes: {}, settings: {} };
   for (const [k, v] of Object.entries(CONTENT.docs)) {
     const i = k.indexOf("/"); const col = k.slice(0, i), id = k.slice(i + 1);
     const key = COL2KEY[col]; if (!key) continue;
@@ -302,13 +302,29 @@ function removeImage(id) {
   if (!META.imgDel.includes(id)) META.imgDel.push(id);
   idb.del("img", id); persistLocal(); scheduleSync(3000);
 }
-async function imageURL(id) {
-  if (IMG_URL[id]) return IMG_URL[id];
-  let text = await idb.get("img", id);
+async function encText(id) {
+  let text = null; try { text = await idb.get("img", id); } catch (e) {}
   if (!text && TOKEN && navigator.onLine) {
     const g = await ghGet("vault/img/" + id + ".enc").catch(() => null);
-    if (g) { text = g.text; idb.set("img", id, text); }
+    if (g) { text = g.text; idb.set("img", id, text).catch(() => {}); }
   }
+  return text;
+}
+/* Fichier d'un document (PDF, image, texte) : chiffré comme les photos */
+const FILE_MAX = 12 * 1024 * 1024;
+async function addFile(file) {
+  if (file.size > FILE_MAX) throw Object.assign(new Error("too_large"), { code: "too_large" });
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const id = "file-" + Date.now().toString(36) + b64(rnd(6)).replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
+  await idb.set("img", id, await sealK(bytes));
+  META.imgUp.push(id); persistLocal();
+  return { id, name: file.name, type: file.type || guessType(file.name), size: file.size };
+}
+function guessType(n) { n = (n || "").toLowerCase(); return n.endsWith(".pdf") ? "application/pdf" : n.endsWith(".md") ? "text/markdown" : n.endsWith(".txt") ? "text/plain" : /\.(jpe?g)$/.test(n) ? "image/jpeg" : n.endsWith(".png") ? "image/png" : "application/octet-stream"; }
+async function fileBytes(id) { const t = await encText(id); return t ? openBytes(t) : null; }
+async function imageURL(id) {
+  if (IMG_URL[id]) return IMG_URL[id];
+  const text = await encText(id);
   if (!text) return "";
   const bytes = await openBytes(text);
   const type = bytes[0] === 0x89 ? "image/png" : bytes[0] === 0x52 ? "image/webp" : "image/jpeg";

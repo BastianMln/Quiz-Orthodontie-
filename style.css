@@ -264,3 +264,23 @@ button.chip{cursor:pointer}
 .askpanel{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 a.btn{text-decoration:none;display:inline-block}
 .prompt{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;margin:0;max-height:320px;overflow:auto}
+/* chat */
+.chat{margin-top:16px}
+.chatfab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--acc);background:var(--acc-soft);color:var(--acc);border-radius:999px;padding:8px 14px;font-weight:600;cursor:pointer}
+.chatfab .bubble{width:22px;height:22px;border-radius:50% 50% 50% 4px;background:var(--acc);color:var(--acc-ink);display:grid;place-items:center;font-size:13px}
+.chatbox{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;background:var(--bg)}
+.chatbox textarea{min-height:64px}
+.chatlog{display:grid;gap:8px;margin-bottom:10px;max-height:60vh;overflow:auto}
+.msg{padding:10px 12px;border-radius:12px;max-width:92%;line-height:1.5}
+.msg p{margin:0 0 8px}.msg p:last-child{margin:0}.msg ul{margin:4px 0 8px;padding-left:20px}
+.msg.me{justify-self:end;background:var(--acc);color:var(--acc-ink);border-bottom-right-radius:4px;white-space:pre-wrap}
+.msg.ai{justify-self:start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px;font-family:var(--f-read)}
+.msg.wait{color:var(--ink-3);font-style:italic}
+.cites{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-family:var(--f-ui)}
+.cites a{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--acc);text-decoration:none;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* fichiers et génération */
+.filebox{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);margin:10px 0}
+.fic{font-family:var(--f-mono);font-size:11px;font-weight:600;background:var(--acc);color:var(--acc-ink);border-radius:4px;padding:6px 6px}
+.genq{cursor:pointer;align-items:start}
+.genopts{margin:6px 0;padding-left:20px;font-size:13.5px;color:var(--ink-2)}
+.genopts li.ok{color:var(--ok);font-weight:600}

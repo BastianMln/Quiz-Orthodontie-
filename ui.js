@@ -328,7 +328,9 @@ function correction(q, sel, g, isReview) {
       ${fig}
       ${more ? (q.ess ? `<details class="more"><summary>Approfondir : cours, synthèses, sources</summary><div class="inner">${more}</div></details>` : more) : ""}
     </div>
+    <div id="chat" class="chat"></div>
     <div class="actions"><button class="btn" id="next">${isReview ? "Retour au bilan" : (last ? "Voir mon bilan" : "Question suivante")}</button></div>`;
+  mountChat(S.list[S.i], q, sel);
   const nx = $("#next");
   nx.onclick = () => { if (isReview || last) end(); else { S.i++; question(); } };
   nx.focus({ preventScroll: true });
@@ -533,6 +535,7 @@ function requestForm() {
 function renderLib() {
   renderTrack(); $("#qset").textContent = "Bibliothèque";
   if (VIEW.edit) return VIEW.edit.type === "doc" ? docForm() : VIEW.edit.type === "q" ? qForm() : VIEW.edit.type === "serie" ? serieForm() : dossierForm();
+  if (VIEW.gen && DATA.lib[VIEW.gen.doc]) return genForm(VIEW.gen.doc);
   if (VIEW.doc && DATA.lib[VIEW.doc]) return docDetail(VIEW.doc);
   const sub = VIEW.sub;
   const head = `<div class="subnav" role="tablist">
@@ -577,15 +580,19 @@ function docDetail(id) {
     ${d.ref ? `<p class="refline">${esc(d.ref)}</p>` : ""}
     ${d.url ? `<p><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.idLabel || "Ouvrir le lien")}</a></p>` : ""}
     ${d.location ? `<p class="muted">Où le retrouver : ${esc(d.location)}</p>` : ""}
+    ${d.file ? `<div class="filebox"><span class="fic" aria-hidden="true">${d.file.type === "application/pdf" ? "PDF" : /^image/.test(d.file.type) ? "IMG" : "TXT"}</span><div><div class="ti">${esc(d.file.name)}</div><div class="su">${(d.file.size / 1048576).toFixed(1)} Mo · chiffré</div></div><button class="sbtn" id="openfile">Ouvrir</button></div>` : ""}
     ${d.note ? `<div class="body docnote">${md(d.note)}</div>` : ""}
+    <div class="actions"><button class="btn" id="gen">Créer des QCM avec ce document</button></div>
     <h3 style="font-size:15px;margin:20px 0 8px">Questions liées</h3>
     <p class="muted" style="margin:0 0 8px">${qids.length ? `${plural(qids.length, "question")} (${u.primary.length} en source principale)` : "Aucune question ne cite ce document."}</p>
-    <div class="actions">${qids.length ? `<button class="btn" id="runq">Faire ces questions</button>` : ""}<button class="btn ghost" id="edit">Modifier</button><button class="btn ghost" id="del">Supprimer</button></div>
+    <div class="actions">${qids.length ? `<button class="btn ghost" id="runq">Faire ces questions</button>` : ""}<button class="btn ghost" id="edit">Modifier</button><button class="btn ghost" id="del">Supprimer</button></div>
     ${VIEW.confirm && VIEW.confirm.id === id ? delDocConfirm(id, d, u) : ""}
   </div>`);
   $("#back").onclick = () => { VIEW.doc = null; VIEW.confirm = null; renderLib(); };
   const rq = $("#runq"); if (rq) rq.onclick = () => startRun(mixKeepDossiers(qids), d.title);
   $("#edit").onclick = () => { VIEW.edit = { type: "doc", id }; renderLib(); };
+  const of = $("#openfile"); if (of) of.onclick = () => openDocFile(d, false);
+  $("#gen").onclick = () => { VIEW.gen = null; genForm(id); window.scrollTo({ top: 0 }); };
   $("#del").onclick = () => { VIEW.confirm = { id }; docDetail(id); };
   $$("[data-theme]").forEach(b => b.onclick = () => { VIEW.tab = "themes"; VIEW.theme = b.dataset.theme; setNav(); renderThemes(); });
   bindLib();
@@ -656,6 +663,7 @@ function deleteDoc(id, withQuestions) {
   if (withQuestions) for (const qid of u.primary) { const q = DATA.qs[qid]; delDoc("questions", qid); if (q && q.image) removeImage(q.image); }
   const touch = withQuestions ? u.cited : u.primary.concat(u.cited);
   for (const qid of touch) { const q = DATA.qs[qid]; if (q) putDoc("questions", qid, Object.assign({}, q, { docs: (q.docs || []).filter(d => d !== id) })); }
+  const df = DATA.lib[id] && DATA.lib[id].file; if (df && df.id) removeImage(df.id);
   delDoc("library", id);
   toast(withQuestions && u.primary.length ? `Document et ${plural(u.primary.length, "question")} supprimés` : "Document supprimé");
   VIEW.confirm = null; VIEW.doc = null; renderLib();
@@ -698,10 +706,28 @@ function docForm() {
       <label class="f">Lien<input type="url" id="d_url" value="${esc(d.url || "")}" placeholder="https://"></label>
       <label class="f">Texte du lien <small>ex. PMID 12345678</small><input type="text" id="d_idl" value="${esc(d.idLabel || "")}"></label>
     </div>
-    <label class="f">Notes <small>résumé, points clés…</small><textarea id="d_note" class="tall">${esc(d.note || "")}</textarea></label>`);
+    <div class="f" style="display:grid;gap:6px"><span style="font-size:13px;font-weight:600;color:var(--ink-2)">Fichier <small style="font-weight:400;color:var(--ink-3)">PDF, image ou texte, 12 Mo max · chiffré avant l'envoi</small></span><div id="filezone"></div></div>
+    <label class="f">Notes <small>résumé, points clés… (servent aussi à créer des QCM)</small><textarea id="d_note" class="tall">${esc(d.note || "")}</textarea></label>`);
+  let fileMeta = d.file || null; const addedFiles = [];
+  const drawFile = () => {
+    $("#filezone").innerHTML = (fileMeta ? `<div class="filebox"><span class="fic">${fileMeta.type === "application/pdf" ? "PDF" : /^image/.test(fileMeta.type) ? "IMG" : "TXT"}</span><div><div class="ti">${esc(fileMeta.name)}</div><div class="su">${(fileMeta.size / 1048576).toFixed(1)} Mo</div></div><button class="sbtn del" id="filedel">Retirer</button></div>` : "") +
+      `<label class="sbtn" style="justify-self:start;cursor:pointer">${fileMeta ? "Remplacer le fichier" : "Joindre un fichier"}<input type="file" id="fileinp" accept="application/pdf,image/*,text/plain,text/markdown,.md,.txt,.pdf" hidden></label>`;
+    const fd = $("#filedel"); if (fd) fd.onclick = () => { fileMeta = null; drawFile(); };
+    $("#fileinp").onchange = async e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      if (/\.(docx?|pages|pptx?|key)$/i.test(f.name)) return toast("Exporte-le d'abord en PDF (Fichier › Exporter en PDF).");
+      try { toast("Chiffrement du fichier…"); fileMeta = await addFile(f); addedFiles.push(fileMeta.id); if (!val("d_title")) $("#d_title").value = f.name.replace(/\.[^.]+$/, ""); drawFile(); toast("Fichier ajouté"); }
+      catch (err) { toast(err.code === "too_large" ? "Fichier trop lourd (12 Mo maximum)." : "Ce fichier n'a pas pu être lu."); }
+    };
+  };
+  drawFile();
+  $("#cancel").onclick = $("#back").onclick = () => { addedFiles.forEach(removeImage); backToList(); };
   $("#save").onclick = () => {
-    const obj = { title: val("d_title"), kind: val("d_kind"), level: val("d_level"), location: val("d_loc"), ref: val("d_ref"), url: val("d_url"), idLabel: val("d_idl"), note: val("d_note"), themes: pickedThemes() };
+    const obj = { title: val("d_title"), kind: val("d_kind"), level: val("d_level"), location: val("d_loc"), ref: val("d_ref"), url: val("d_url"), idLabel: val("d_idl"), note: val("d_note"), themes: pickedThemes(), file: fileMeta };
     if (!obj.title) { toast("Donne un titre au document."); return; }
+    const oldF = d.file && d.file.id; if (oldF && (!fileMeta || fileMeta.id !== oldF)) removeImage(oldF);
+    addedFiles.filter(x => !fileMeta || x !== fileMeta.id).forEach(removeImage);
+    if (fileMeta) scheduleSync(500);
     const nid = id || rid("doc"); putDoc("library", nid, obj); toast("Document enregistré");
     VIEW.edit = null; VIEW.doc = nid; renderLib(); window.scrollTo({ top: 0 });
   };
@@ -828,6 +854,7 @@ function renderSettings(err) {
     <p class="muted">Dernière synchro réussie : ${ago(META.lastSync)}${pending.length ? ` · en attente : ${pending.join(", ")}` : ""}. Tout reste utilisable hors ligne ; l'envoi se fait dès que le réseau revient.</p>
     <div class="actions"><button class="btn" id="syncnow" ${SYNC.busy ? "disabled" : ""}>Synchroniser maintenant</button></div>
   </section>
+  ${aiSettingsHTML()}
   <section class="panel" style="margin-bottom:14px">
     <h2 style="font-size:17px">Installer l'app</h2>
     ${isStandalone() ? `<p>Tu utilises l'app installée. 👍</p>` : `
@@ -860,6 +887,7 @@ function renderSettings(err) {
     <p class="small" style="margin-top:14px">Version ${APP_VERSION}</p>
   </section>`);
   $("#syncnow").onclick = () => sync();
+  bindAISettings();
   $("#chpw").onclick = async () => {
     const o = $("#opw").value, n = $("#npw").value;
     if (n.length < 10) return renderSettings("Le nouveau mot de passe doit faire au moins 10 caractères.");
@@ -876,7 +904,7 @@ function renderSettings(err) {
     catch (e) { TOKEN = old; toast(e.code === "token" ? "Jeton refusé." : e.code === "readonly" ? "Ce jeton ne peut que lire." : "Vérification impossible (" + e.code + ")."); }
   };
   $("#bk").onclick = () => {
-    const blob = new Blob([JSON.stringify({ app: "quiz-odf", exported: new Date().toISOString(), content: CONTENT, h: PROG })], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ app: "quiz-odf", exported: new Date().toISOString(), content: Object.assign({}, CONTENT, { docs: Object.fromEntries(Object.entries(CONTENT.docs).filter(([k]) => !k.startsWith("settings/"))) }), h: PROG })], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "quiz-odf-sauvegarde-" + new Date().toISOString().slice(0, 10) + ".json"; document.body.appendChild(a); a.click(); a.remove();
   };
   $("#bkin").onchange = e => {
@@ -900,7 +928,7 @@ function renderSettings(err) {
    DÉMARRAGE
    ============================================================ */
 function go(tab) {
-  VIEW.tab = tab; VIEW.edit = null; VIEW.confirm = null; VIEW.doc = null; VIEW.theme = null; VIEW.manage = false; VIEW.renaming = null; VIEW.request = null;
+  VIEW.tab = tab; VIEW.edit = null; VIEW.confirm = null; VIEW.doc = null; VIEW.theme = null; VIEW.manage = false; VIEW.renaming = null; VIEW.request = null; VIEW.gen = null;
   if (tab === "rev") VIEW.mode = "home";
   render(); window.scrollTo({ top: 0 });
 }
